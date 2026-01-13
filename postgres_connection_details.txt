@@ -1,0 +1,19 @@
+# PostgreSQL Connection Details
+# =============================
+# Use these credentials to connect to the PostgreSQL database
+
+Host: postgres (from within Docker network) / localhost (from host machine)
+Port: 5432
+Database: ecommerce_events
+Username: lab_user
+Password: lab_password
+
+# JDBC URL (for Spark)
+jdbc:postgresql://postgres:5432/ecommerce_events
+
+# Python Connection String (psycopg2)
+host=postgres dbname=ecommerce_events user=lab_user password=lab_password port=5432
+
+# From Host Machine (outside Docker)
+Host: localhost
+Port: 5432
