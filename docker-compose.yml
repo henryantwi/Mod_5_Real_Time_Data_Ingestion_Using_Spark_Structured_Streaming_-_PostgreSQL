@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
     image: postgres:15
-    container_name: lab2_postgres
+    container_name: realtime_postgres
     environment:
       POSTGRES_USER: lab_user
       POSTGRES_PASSWORD: lab_password
@@ -15,7 +13,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./sql:/docker-entrypoint-initdb.d
     networks:
-      - lab2_network
+      - realtime_network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lab_user -d ecommerce_events"]
       interval: 10s
@@ -27,7 +25,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.spark
-    container_name: lab2_spark
+    container_name: realtime_spark
     environment:
       - SPARK_MODE=master
       - POSTGRES_HOST=postgres
@@ -44,13 +42,13 @@ services:
       - ./data:/opt/spark/work-dir/data
       - ./output:/opt/spark/work-dir/output
     networks:
-      - lab2_network
+      - realtime_network
     depends_on:
       postgres:
         condition: service_healthy
 
 networks:
-  lab2_network:
+  realtime_network:
     driver: bridge
 
 volumes:
