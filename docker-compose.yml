@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: lab2_postgres
+    environment:
+      POSTGRES_USER: lab_user
+      POSTGRES_PASSWORD: lab_password
+      POSTGRES_DB: ecommerce_events
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+    networks:
+      - lab2_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab_user -d ecommerce_events"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Apache Spark
+  spark:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    container_name: lab2_spark
+    environment:
+      - SPARK_MODE=master
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=ecommerce_events
+      - POSTGRES_USER=lab_user
+      - POSTGRES_PASSWORD=lab_password
+    ports:
+      - "8080:8080"   # Spark Web UI
+      - "7077:7077"   # Spark Master Port
+      - "4040:4040"   # Spark Application UI
+    volumes:
+      - ./scripts:/opt/spark/work-dir/scripts
+      - ./data:/opt/spark/work-dir/data
+      - ./output:/opt/spark/work-dir/output
+    networks:
+      - lab2_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+networks:
+  lab2_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
