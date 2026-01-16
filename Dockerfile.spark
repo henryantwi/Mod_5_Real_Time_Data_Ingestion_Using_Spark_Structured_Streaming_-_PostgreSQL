@@ -1,4 +1,4 @@
-FROM apache/spark:3.5.0
+FROM spark:python3-java17
 
 USER root
 
@@ -6,8 +6,8 @@ USER root
 ENV PATH="/opt/spark/bin:${PATH}"
 ENV SPARK_HOME="/opt/spark"
 
-# Create python symlink (image has python3)
-RUN ln -s /usr/bin/python3 /usr/bin/python
+# Create python symlink (if needed - may already exist in image)
+# RUN ln -s /usr/bin/python3 /usr/bin/python
 
 # Install Python dependencies
 RUN pip3 install --no-cache-dir \
@@ -27,4 +27,4 @@ RUN mkdir -p /opt/spark/work-dir/scripts \
 WORKDIR /opt/spark/work-dir
 
 # Keep container running
-CMD ["tail", "-f", "/dev/null"]
+CMD ["tail", "-f", "/dev/null"] 
