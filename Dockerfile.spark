@@ -9,11 +9,9 @@ ENV SPARK_HOME="/opt/spark"
 # Create python symlink (if needed - may already exist in image)
 # RUN ln -s /usr/bin/python3 /usr/bin/python
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir \
-    faker \
-    psycopg2-binary \
-    pandas
+# Install Python dependencies from requirements.txt
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
 # Download PostgreSQL JDBC Driver
 RUN curl -o /opt/spark/jars/postgresql-42.7.1.jar \

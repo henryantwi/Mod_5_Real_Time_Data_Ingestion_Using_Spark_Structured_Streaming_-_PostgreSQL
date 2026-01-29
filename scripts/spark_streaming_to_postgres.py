@@ -20,6 +20,9 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
+# Import Pydantic validation functions
+from models import validate_batch, log_validation_summary
+
 # Configuration from environment variables
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
@@ -64,15 +67,33 @@ def create_spark_session():
 
 def write_to_postgres(batch_df, batch_id):
     """
-    Write each micro-batch to PostgreSQL.
-    This function is called for each batch in the streaming query.
+    Write each micro-batch to PostgreSQL after Pydantic validation.
+    Invalid rows are logged and skipped; valid rows are written.
     """
     if batch_df.isEmpty():
         print(f"Batch {batch_id}: No data to write")
         return
 
+    # Convert Spark DataFrame rows to dictionaries for validation
+    rows = [row.asDict() for row in batch_df.collect()]
+    
+    # Validate using Pydantic
+    valid_rows, invalid_rows = validate_batch(rows)
+    
+    # Log validation summary
+    log_validation_summary(batch_id, len(valid_rows), len(invalid_rows))
+    
+    # If no valid rows, exit early
+    if not valid_rows:
+        print(f"Batch {batch_id}: All records failed validation, nothing to write")
+        return
+
+    # Create DataFrame from valid rows
+    spark = batch_df.sparkSession
+    valid_df = spark.createDataFrame(valid_rows)
+    
     # Add created_at timestamp
-    df_with_timestamp = batch_df.withColumn("created_at", current_timestamp())
+    df_with_timestamp = valid_df.withColumn("created_at", current_timestamp())
 
     # Connection properties
     connection_properties = {
@@ -82,7 +103,7 @@ def write_to_postgres(batch_df, batch_id):
     }
 
     try:
-        # Write to PostgreSQL
+        # Write valid records to PostgreSQL
         df_with_timestamp.write.jdbc(
             url=JDBC_URL,
             table="user_events",
@@ -90,10 +111,11 @@ def write_to_postgres(batch_df, batch_id):
             properties=connection_properties,
         )
 
-        record_count = batch_df.count()
         print(
-            f"Batch {batch_id}: Successfully wrote {record_count} records to PostgreSQL"
+            f"Batch {batch_id}: Successfully wrote {len(valid_rows)} records to PostgreSQL"
         )
+        if invalid_rows:
+            print(f"Batch {batch_id}: Skipped {len(invalid_rows)} invalid records")
 
     except Exception as e:
         print(f"Batch {batch_id}: Error writing to PostgreSQL - {str(e)}")
