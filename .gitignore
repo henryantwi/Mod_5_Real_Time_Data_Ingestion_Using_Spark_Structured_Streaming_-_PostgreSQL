@@ -2,5 +2,7 @@
 .env
 output/
 data/
+logs/
+!logs/.gitkeep
 lab_work.md
 # user_guide.md

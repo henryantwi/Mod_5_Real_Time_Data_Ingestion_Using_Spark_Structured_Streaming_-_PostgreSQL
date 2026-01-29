@@ -33,6 +33,7 @@ services:
       - POSTGRES_DB=ecommerce_events
       - POSTGRES_USER=lab_user
       - POSTGRES_PASSWORD=lab_password
+      - VALIDATION_LOG_DIR=/opt/spark/work-dir/logs
     ports:
       - "8080:8080"   # Spark Web UI
       - "7077:7077"   # Spark Master Port
@@ -41,6 +42,7 @@ services:
       - ./scripts:/opt/spark/work-dir/scripts
       - ./data:/opt/spark/work-dir/data
       - ./output:/opt/spark/work-dir/output
+      - ./logs:/opt/spark/work-dir/logs
     networks:
       - realtime_network
     depends_on:

@@ -21,7 +21,10 @@ from pyspark.sql.types import (
 )
 
 # Import Pydantic validation functions
-from models import validate_batch, log_validation_summary
+from models import validate_batch, log_validation_summary, get_log_file_paths
+
+# Import performance tracking
+from performance_tracker import get_tracker, PerformanceTracker
 
 # Configuration from environment variables
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
@@ -69,7 +72,11 @@ def write_to_postgres(batch_df, batch_id):
     """
     Write each micro-batch to PostgreSQL after Pydantic validation.
     Invalid rows are logged and skipped; valid rows are written.
+    Performance metrics are tracked for each batch.
     """
+    # Get performance tracker
+    tracker = get_tracker()
+    
     if batch_df.isEmpty():
         print(f"Batch {batch_id}: No data to write")
         return
@@ -77,8 +84,14 @@ def write_to_postgres(batch_df, batch_id):
     # Convert Spark DataFrame rows to dictionaries for validation
     rows = [row.asDict() for row in batch_df.collect()]
     
-    # Validate using Pydantic
-    valid_rows, invalid_rows = validate_batch(rows)
+    # Start tracking this batch
+    tracker.start_batch(batch_id, len(rows))
+    
+    # Validate using Pydantic (pass batch_id for logging)
+    valid_rows, invalid_rows = validate_batch(rows, batch_id=batch_id)
+    
+    # Record validation metrics
+    tracker.record_validation(len(valid_rows), len(invalid_rows))
     
     # Log validation summary
     log_validation_summary(batch_id, len(valid_rows), len(invalid_rows))
@@ -86,6 +99,7 @@ def write_to_postgres(batch_df, batch_id):
     # If no valid rows, exit early
     if not valid_rows:
         print(f"Batch {batch_id}: All records failed validation, nothing to write")
+        tracker.end_batch()
         return
 
     # Create DataFrame from valid rows
@@ -103,6 +117,9 @@ def write_to_postgres(batch_df, batch_id):
     }
 
     try:
+        # Track database write time
+        tracker.start_db_write()
+        
         # Write valid records to PostgreSQL
         df_with_timestamp.write.jdbc(
             url=JDBC_URL,
@@ -110,6 +127,9 @@ def write_to_postgres(batch_df, batch_id):
             mode="append",
             properties=connection_properties,
         )
+        
+        # Record DB write completion
+        tracker.record_db_write()
 
         print(
             f"Batch {batch_id}: Successfully wrote {len(valid_rows)} records to PostgreSQL"
@@ -120,6 +140,11 @@ def write_to_postgres(batch_df, batch_id):
     except Exception as e:
         print(f"Batch {batch_id}: Error writing to PostgreSQL - {str(e)}")
         raise
+    finally:
+        # End batch tracking
+        batch_metrics = tracker.end_batch()
+        print(f"Batch {batch_id}: Processing time {batch_metrics.total_processing_time_ms:.2f}ms, "
+              f"Throughput: {batch_metrics.records_per_second:.2f} records/sec")
 
 
 def main():
@@ -129,6 +154,14 @@ def main():
     print(f"Input Directory: {INPUT_DIR}")
     print(f"PostgreSQL URL: {JDBC_URL}")
     print(f"Checkpoint Directory: {CHECKPOINT_DIR}")
+    
+    # Print log file locations
+    log_paths = get_log_file_paths()
+    print("-" * 70)
+    print("Validation Error Logs:")
+    print(f"  Log Directory: {log_paths['log_directory']}")
+    print(f"  Error Log: {log_paths['validation_errors_log']}")
+    print(f"  Detailed JSON: {log_paths['validation_errors_json']}")
     print("=" * 70)
 
     # Create Spark session
@@ -175,6 +208,14 @@ def main():
         query.stop()
         print("Streaming query stopped")
     finally:
+        # Print performance summary
+        tracker = get_tracker()
+        tracker.print_summary()
+        
+        # Save summary to file
+        summary_file = tracker.save_summary_to_file()
+        print(f"Performance summary saved to: {summary_file}")
+        
         spark.stop()
         print("Spark session closed")
 
