@@ -27,7 +27,10 @@ This project builds a complete real-time data ingestion pipeline that:
 
 - Real-time data streaming and processing
 - Data transformation using Spark SQL
-- Relational database integration
+- **Pydantic-based data validation** with detailed error logging
+- **UUID-typed identifiers** for data integrity
+- **Performance metrics tracking** (throughput, latency, validation rates)
+- Relational database integration with PostgreSQL
 - Continuous data ingestion handling
 - Docker-based containerized environment
 
@@ -101,10 +104,14 @@ By completing this project, you will:
 
 ### Key Features
 
-- ✅ **Real-time Processing**: Sub-minute latency from generation to storage
+- ✅ **Real-time Processing**: ~2 second latency from generation to storage
+- ✅ **High Throughput**: Up to 15.98 records/second (30x improvement with batching)
+- ✅ **Data Validation**: Pydantic-based validation with detailed error logging
+- ✅ **UUID Identifiers**: Native PostgreSQL UUID types for data integrity
 - ✅ **Fault Tolerance**: Checkpoint-based recovery mechanism
 - ✅ **Scalability**: Docker-based horizontal scaling capability
 - ✅ **Schema Enforcement**: Strict validation of incoming data
+- ✅ **Performance Tracking**: Automated metrics collection and reporting
 - ✅ **Data Persistence**: Volume-backed PostgreSQL storage
 - ✅ **Monitoring**: Built-in Spark UI for job observability
 - ✅ **Containerization**: Isolated, reproducible environment
@@ -116,16 +123,25 @@ By completing this project, you will:
 ├── docker-compose.yml              # Docker orchestration configuration
 ├── Dockerfile.spark                # Spark container definition
 ├── README.md                       # This file
+├── requirements.txt                # Python dependencies
 ├── user_guide.md                   # Detailed usage instructions
-├── lab_work.md                     # Lab requirements and objectives
+├── performance_metrics.md          # System performance report with test results
 ├── postgres_connection_details.txt # Database connection information
 │
 ├── scripts/
-│   ├── data_generator.py          # Generates fake e-commerce events
-│   └── spark_streaming_to_postgres.py  # Spark streaming job
+│   ├── data_generator.py           # Generates fake e-commerce events (UUID format)
+│   ├── spark_streaming_to_postgres.py  # Spark streaming job with validation
+│   ├── models.py                   # Pydantic models for data validation
+│   ├── performance_tracker.py      # Performance metrics tracking
+│   └── test_uuid_validation.py     # Unit tests for validation
 │
 ├── sql/
-│   └── postgres_setup.sql         # Database schema and setup
+│   └── postgres_setup.sql          # Database schema with UUID types
+│
+├── logs/                           # Validation and performance logs
+│   ├── validation_errors.log       # Human-readable validation errors
+│   ├── validation_errors_detailed.json  # JSON format for analysis
+│   └── performance_metrics.json    # Per-batch performance data
 │
 ├── data/                           # Input directory (monitored by Spark)
 ├── output/                         # Spark checkpoints and output
@@ -257,58 +273,98 @@ docker-compose down -v
 ### 1. Data Generator (`scripts/data_generator.py`)
 
 Generates realistic e-commerce events including:
+- **UUIDs**: Standard UUID format for event_id, user_id, session_id
 - Event types: view, add_to_cart, remove_from_cart, purchase, wishlist
-- Product information: ID, name, category, price
-- User data: user ID, session ID, device type
+- Product information: ID (PROD###), name, category, price
+- User data: UUID-based user ID, session ID, device type
 - Timestamps: event and creation timestamps
+- **Session simulation**: 70% chance to reuse existing users for realistic patterns
 
 ### 2. Spark Streaming Job (`scripts/spark_streaming_to_postgres.py`)
 
-- Monitors directory for new CSV files
-- Reads and validates data using defined schema
-- Transforms timestamps and data types
-- Writes to PostgreSQL using JDBC
-- Handles errors and provides logging
+- Monitors directory for new CSV files using `readStream`
+- Uses `foreachBatch` for custom micro-batch processing
+- **Pydantic validation** before database writes
+- **Performance tracking** for throughput and latency metrics
+- Writes to PostgreSQL using JDBC with `stringtype=unspecified` for UUID casting
+- Maintains checkpoints for fault tolerance
+- Graceful shutdown with performance summary
 
-### 3. PostgreSQL Setup (`sql/postgres_setup.sql`)
+### 3. Data Validation (`scripts/models.py`)
+
+- **Pydantic BaseModel** for schema validation
+- UUID format validation using regex patterns
+- Business rule enforcement (event types, price >= 0, quantity >= 1)
+- Detailed error logging to files for debugging
+- JSON-formatted error logs for analysis
+
+### 4. Performance Tracking (`scripts/performance_tracker.py`)
+
+- Per-batch metrics: throughput, latency, validation rates
+- Aggregate statistics: min, max, average, median
+- JSON output for analysis
+- Summary report generation on shutdown
+
+### 5. PostgreSQL Setup (`sql/postgres_setup.sql`)
 
 Creates:
-- `user_events` table with proper schema
-- Indexes for performance optimization
+- `user_events` table with **UUID columns** (event_id, user_id, session_id)
+- `uuid-ossp` extension for UUID support
+- Indexes on user_id, event_type, timestamp, product_id
 - `event_summary` view for analytics
 - User permissions
 
-### 4. Docker Configuration
+### 6. Docker Configuration
 
-- **PostgreSQL**: Database server with automatic schema initialization
-- **Spark**: Custom image with Python dependencies and JDBC driver
-- **Networking**: Bridge network for container communication
-- **Volumes**: Persistent data storage
+- **PostgreSQL 15**: Database with automatic schema initialization via mounted SQL
+- **Spark 3.5.0**: Custom image with Python dependencies and JDBC driver
+- **Networking**: Bridge network (`realtime_network`) for container communication
+- **Volumes**: 
+  - `./scripts` → `/opt/spark/work-dir/scripts`
+  - `./data` → `/opt/spark/work-dir/data`
+  - `./logs` → `/opt/spark/work-dir/logs`
+  - `./output` → `/opt/spark/work-dir/output`
 
 ## Deliverables
 
 | Deliverable | Description | Status |
 |-------------|-------------|--------|
-| `data_generator.py` | Python script to generate CSV event data | Complete |
-| `spark_streaming_to_postgres.py` | Spark Structured Streaming job | Complete |
-| `postgres_setup.sql` | SQL script to create database and table | Complete |
-| `postgres_connection_details.txt` | Connection information | Complete |
-| `user_guide.md` | Step-by-step instructions | Complete |
-| `project_overview.md` | System components and flow explanation | Pending |
-| `test_cases.md` | Manual test plan with expected outcomes | Pending |
-| `performance_metrics.md` | System performance report | Pending |
-| `system_architecture.png` | Data flow diagram | Pending |
+| `data_generator.py` | Python script to generate CSV event data with UUIDs | ✅ Complete |
+| `spark_streaming_to_postgres.py` | Spark Structured Streaming job with validation | ✅ Complete |
+| `models.py` | Pydantic models for data validation | ✅ Complete |
+| `performance_tracker.py` | Performance metrics tracking module | ✅ Complete |
+| `postgres_setup.sql` | SQL script with UUID types and indexes | ✅ Complete |
+| `postgres_connection_details.txt` | Connection information | ✅ Complete |
+| `user_guide.md` | Step-by-step instructions | ✅ Complete |
+| `performance_metrics.md` | System performance report with test results | ✅ Complete |
+| `system_architecture.png` | Data flow diagram | ✅ Complete |
+| `README.md` | Project overview and documentation | ✅ Complete |
 
 ## Testing Checklist
 
-- [ ] CSV files are being generated correctly
-- [ ] Spark detects and processes new files
-- [ ] Data transformations are correct
-- [ ] Data is written to PostgreSQL without errors
-- [ ] Performance metrics are within expected limits
-- [ ] Checkpoints are created and maintained
-- [ ] Error handling works correctly
-- [ ] Database indexes improve query performance
+- [x] CSV files are being generated correctly (with UUID format)
+- [x] Spark detects and processes new files
+- [x] Data transformations are correct
+- [x] Data validation works (Pydantic models)
+- [x] Data is written to PostgreSQL without errors
+- [x] Performance metrics are within expected limits (11.95 rec/sec achieved)
+- [x] Checkpoints are created and maintained
+- [x] Error handling works correctly (validation errors logged)
+- [x] Database indexes improve query performance
+- [x] UUID type casting works with PostgreSQL
+
+## Performance Highlights
+
+Based on actual testing (see `performance_metrics.md` for details):
+
+| Metric | 1 Event/Batch | 20 Events/Batch | Improvement |
+|--------|---------------|-----------------|-------------|
+| **Throughput** | 0.39 rec/sec | 11.95 rec/sec | **30x faster** |
+| **Peak Throughput** | 0.51 rec/sec | 15.98 rec/sec | **31x faster** |
+| **Avg Latency** | 2,297 ms | 1,830 ms | 20% faster |
+| **Validation Rate** | 100% | 100% | ✅ Perfect |
+
+**Key Insight**: Batch size is the most important tuning parameter. Database write overhead is amortized across all records in a batch.
 
 ## Troubleshooting
 
@@ -346,31 +402,60 @@ docker-compose restart spark
 
 ### user_events Table
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | SERIAL | Primary key (auto-increment) |
-| event_id | VARCHAR(50) | Unique event identifier |
-| user_id | VARCHAR(50) | User identifier |
-| event_type | VARCHAR(20) | Type of event (view, purchase, etc.) |
-| product_id | VARCHAR(50) | Product identifier |
-| product_name | VARCHAR(255) | Product name |
-| product_category | VARCHAR(100) | Product category |
-| product_price | DECIMAL(10,2) | Product price |
-| quantity | INTEGER | Quantity (default: 1) |
-| event_timestamp | TIMESTAMP | When the event occurred |
-| session_id | VARCHAR(50) | User session identifier |
-| device_type | VARCHAR(20) | Device type (mobile, desktop, tablet) |
-| created_at | TIMESTAMP | When record was created in database |
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| id | SERIAL | NOT NULL | Primary key (auto-increment) |
+| event_id | **UUID** | NOT NULL | Unique event identifier (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) |
+| user_id | **UUID** | NOT NULL | User identifier (UUID format) |
+| event_type | VARCHAR(20) | NOT NULL | Type of event (view, add_to_cart, remove_from_cart, purchase, wishlist) |
+| product_id | VARCHAR(50) | NOT NULL | Product identifier (format: PROD###) |
+| product_name | VARCHAR(255) | NOT NULL | Product name |
+| product_category | VARCHAR(100) | NULL | Product category |
+| product_price | DECIMAL(10,2) | NULL | Product price (must be >= 0) |
+| quantity | INTEGER | NULL | Quantity (default: 1, must be >= 1) |
+| event_timestamp | TIMESTAMP | NOT NULL | When the event occurred |
+| session_id | **UUID** | NULL | User session identifier (UUID format) |
+| device_type | VARCHAR(20) | NULL | Device type (mobile, desktop, tablet) |
+| created_at | TIMESTAMP | NOT NULL | When record was created in database (auto-generated) |
+
+### Indexes
+
+| Index Name | Column | Purpose |
+|------------|--------|---------|
+| `idx_user_events_user_id` | user_id | Fast user lookup |
+| `idx_user_events_event_type` | event_type | Fast event type filtering |
+| `idx_user_events_timestamp` | event_timestamp | Time-based queries |
+| `idx_user_events_product_id` | product_id | Product analytics |
+
+### Views
+
+**`event_summary`** - Aggregated analytics view:
+```sql
+SELECT event_type, COUNT(*) as event_count, 
+       COUNT(DISTINCT user_id) as unique_users,
+       COUNT(DISTINCT product_id) as unique_products,
+       SUM(product_price * quantity) as total_value
+FROM user_events GROUP BY event_type;
+```
+
+### UUID Extension
+
+The database uses PostgreSQL's native UUID type for identifiers, requiring:
+```sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+```
 
 ## Tools & Technologies
 
-- **Apache Spark Structured Streaming**: Real-time data processing
-- **PostgreSQL 15**: Relational database
-- **Python 3**: Data generation and scripting
-- **Docker & Docker Compose**: Containerization
-- **Faker**: Fake data generation library
-- **psycopg2**: PostgreSQL Python adapter
-- **Pandas**: Data manipulation (for future enhancements)
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **Apache Spark** | 3.5.0 | Real-time structured streaming |
+| **PostgreSQL** | 15 | Relational database with UUID support |
+| **Python** | 3.10 | Data generation and scripting |
+| **Pydantic** | 2.x | Data validation and schema enforcement |
+| **Docker & Compose** | Latest | Containerization and orchestration |
+| **Faker** | Latest | Fake data generation library |
+| **PostgreSQL JDBC** | 42.7.1 | Spark-PostgreSQL connectivity |
 
 ## Additional Resources
 
