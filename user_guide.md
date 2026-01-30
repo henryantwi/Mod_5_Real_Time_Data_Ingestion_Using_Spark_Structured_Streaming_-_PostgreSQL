@@ -9,7 +9,7 @@
 ### Step 1: Start the Docker Environment
 
 ```bash
-# Navigate to the project directory
+# Navigate to the project directory (eg.)
 cd "c:\Users\HenryNanaAntwi\Development\Data Engineering Stuff\DE05 Big Data\Lab-2"
 
 # Build and start containers

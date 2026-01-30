@@ -6,4 +6,6 @@ logs/
 !logs/.gitkeep
 lab_work.md
 # user_guide.md
-test_uuid_validation.py
+__pycache__/
+*.pyc
+*.pyo
