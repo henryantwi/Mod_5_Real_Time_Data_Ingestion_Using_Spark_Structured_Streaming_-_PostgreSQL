@@ -10,7 +10,7 @@ Usage:
 
 import os
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col, window, sum as spark_sum, count, approx_count_distinct
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -220,9 +220,110 @@ def write_to_postgres(batch_df, batch_id):
               f"Throughput: {batch_metrics.records_per_second:.2f} records/sec")
 
 
+# ============================================
+# Windowed Aggregations with Watermarking
+# ============================================
+
+def upsert_aggregation_to_postgres(agg_rows: list[dict]) -> dict:
+    """
+    Upsert aggregation results to PostgreSQL using ON CONFLICT DO UPDATE.
+    
+    Uses composite unique constraint: (window_start, window_end, event_type)
+    """
+    upsert_sql = """
+        INSERT INTO event_hourly_summary (
+            window_start, window_end, event_type, 
+            event_count, total_revenue, unique_users, unique_products, updated_at
+        ) VALUES (
+            %(window_start)s, %(window_end)s, %(event_type)s,
+            %(event_count)s, %(total_revenue)s, %(unique_users)s, %(unique_products)s, 
+            CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (window_start, window_end, event_type) DO UPDATE SET
+            event_count = EXCLUDED.event_count,
+            total_revenue = EXCLUDED.total_revenue,
+            unique_users = EXCLUDED.unique_users,
+            unique_products = EXCLUDED.unique_products,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING (xmax = 0) AS inserted;
+    """
+    
+    conn = None
+    inserted_count = 0
+    updated_count = 0
+    
+    try:
+        conn = psycopg2.connect(
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            database=POSTGRES_DB,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD
+        )
+        
+        with conn.cursor() as cursor:
+            for row in agg_rows:
+                cursor.execute(upsert_sql, row)
+                result = cursor.fetchone()
+                if result and result[0]:
+                    inserted_count += 1
+                else:
+                    updated_count += 1
+        
+        conn.commit()
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if conn:
+            conn.close()
+    
+    return {"inserted": inserted_count, "updated": updated_count}
+
+
+def write_aggregations_to_postgres(batch_df, batch_id):
+    """
+    Write windowed aggregation results to PostgreSQL.
+    
+    This is called by foreachBatch for the aggregation stream.
+    The batch_df contains columns: window (struct), event_type, event_count, etc.
+    """
+    if batch_df.isEmpty():
+        print(f"Aggregation Batch {batch_id}: No aggregation data")
+        return
+    
+    # Convert to list of dicts, extracting window start/end from the struct
+    rows = batch_df.collect()
+    agg_rows = []
+    
+    for row in rows:
+        agg_rows.append({
+            "window_start": row["window"]["start"],
+            "window_end": row["window"]["end"],
+            "event_type": row["event_type"],
+            "event_count": row["event_count"],
+            "total_revenue": float(row["total_revenue"]) if row["total_revenue"] else 0.0,
+            "unique_users": row["unique_users"],
+            "unique_products": row["unique_products"]
+        })
+    
+    try:
+        result = upsert_aggregation_to_postgres(agg_rows)
+        print(
+            f"Aggregation Batch {batch_id}: Upserted {len(agg_rows)} hourly summaries "
+            f"({result['inserted']} new, {result['updated']} updated)"
+        )
+    except Exception as e:
+        print(f"Aggregation Batch {batch_id}: Error - {str(e)}")
+        raise
+
+
 def main():
     print("=" * 70)
     print("Spark Structured Streaming - E-Commerce Events to PostgreSQL")
+    print("With Watermarking & Hourly Aggregations")
     print("=" * 70)
     print(f"Input Directory: {INPUT_DIR}")
     print(f"PostgreSQL URL: {JDBC_URL}")
@@ -243,8 +344,9 @@ def main():
 
     print("Spark session created successfully")
 
-    # Create checkpoint directory
+    # Create checkpoint directories for both streams
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    os.makedirs(f"{CHECKPOINT_DIR}/aggregations", exist_ok=True)
 
     # Read streaming data from CSV files
     print(f"Starting to monitor directory: {INPUT_DIR}")
@@ -253,6 +355,9 @@ def main():
         spark.readStream.schema(EVENT_SCHEMA)
         .option("header", "true")
         .option("maxFilesPerTrigger", 1)
+        # Skip files that are deleted or corrupted during processing
+        .option("ignoreMissingFiles", "true")
+        .option("ignoreCorruptFiles", "true")
         .csv(INPUT_DIR)
     )
 
@@ -261,25 +366,65 @@ def main():
         "event_timestamp", col("event_timestamp").cast(TimestampType())
     )
 
-    # Write stream to PostgreSQL using foreachBatch
-    query = (
-        transformed_df.writeStream.foreachBatch(write_to_postgres)
+    # ============================================
+    # Stream 1: Raw Event Upserts (existing behavior)
+    # ============================================
+    raw_events_query = (
+        transformed_df.writeStream
+        .queryName("raw_events_upsert")
+        .foreachBatch(write_to_postgres)
         .outputMode("append")
         .option("checkpointLocation", CHECKPOINT_DIR)
         .trigger(processingTime="10 seconds")
         .start()
     )
+    print("Stream 1: Raw events upsert query started")
 
-    print("Streaming query started. Waiting for data...")
-    print("Press Ctrl+C to stop the streaming job")
+    # ============================================
+    # Stream 2: Hourly Aggregations with Watermarking
+    # ============================================
+    # Add watermark: Allow data up to 10 minutes late
+    watermarked_df = transformed_df.withWatermark("event_timestamp", "10 minutes")
+    
+    # Compute hourly aggregations by event type
+    hourly_aggregations = watermarked_df.groupBy(
+        window("event_timestamp", "1 hour"),  # 1-hour tumbling window
+        "event_type"
+    ).agg(
+        count("*").alias("event_count"),
+        spark_sum(col("product_price") * col("quantity")).alias("total_revenue"),
+        approx_count_distinct("user_id").alias("unique_users"),
+        approx_count_distinct("product_id").alias("unique_products")
+    )
+    
+    # Write aggregations to PostgreSQL
+    aggregations_query = (
+        hourly_aggregations.writeStream
+        .queryName("hourly_aggregations")
+        .foreachBatch(write_aggregations_to_postgres)
+        .outputMode("update")  # Update mode for aggregations
+        .option("checkpointLocation", f"{CHECKPOINT_DIR}/aggregations")
+        .trigger(processingTime="30 seconds")  # Less frequent for aggregations
+        .start()
+    )
+    print("Stream 2: Hourly aggregations query started (watermark: 10 minutes)")
+    
+    print("-" * 70)
+    print("Both streaming queries running. Waiting for data...")
+    print("Tables being written to:")
+    print("  - user_events (raw events with upsert)")
+    print("  - event_hourly_summary (hourly aggregations)")
+    print("Press Ctrl+C to stop all streaming jobs")
     print("-" * 70)
 
     try:
-        query.awaitTermination()
+        # Wait for both queries
+        spark.streams.awaitAnyTermination()
     except KeyboardInterrupt:
-        print("\nStopping streaming query...")
-        query.stop()
-        print("Streaming query stopped")
+        print("\nStopping streaming queries...")
+        raw_events_query.stop()
+        aggregations_query.stop()
+        print("All streaming queries stopped")
     finally:
         # Print performance summary
         tracker = get_tracker()

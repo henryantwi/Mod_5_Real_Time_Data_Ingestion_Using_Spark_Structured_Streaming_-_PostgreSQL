@@ -21,8 +21,8 @@ from faker import Faker
 # Initialize Faker
 fake = Faker()
 
-# Configuration
-OUTPUT_DIR = "/opt/spark/work-dir/data"
+# Configuration - OUTPUT_DIR can be overridden via environment variable
+OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/opt/spark/work-dir/data")
 EVENT_TYPES = ["view", "add_to_cart", "remove_from_cart", "purchase", "wishlist"]
 DEVICE_TYPES = ["mobile", "desktop", "tablet"]
 PRODUCT_CATEGORIES = [

@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install only what's needed for data generation
+RUN pip install --no-cache-dir faker
+
+# Copy the data generator script
+COPY scripts/data_generator.py /app/
+
+# Create output directory
+RUN mkdir -p /app/data
+
+# Default command: run continuously
+# Can be overridden in docker-compose or docker run
+# CMD ["python", "data_generator.py", "--continuous", "--events", "10", "--interval", "5"]

@@ -15,7 +15,7 @@ services:
     networks:
       - realtime_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lab_user -d ecommerce_events"]
+      test: [ "CMD-SHELL", "pg_isready -U lab_user -d ecommerce_events" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,9 +35,9 @@ services:
       - POSTGRES_PASSWORD=lab_password
       - VALIDATION_LOG_DIR=/opt/spark/work-dir/logs
     ports:
-      - "8080:8080"   # Spark Web UI
-      - "7077:7077"   # Spark Master Port
-      - "4040:4040"   # Spark Application UI
+      - "8080:8080" # Spark Web UI
+      - "7077:7077" # Spark Master Port
+      - "4040:4040" # Spark Application UI
     volumes:
       - ./scripts:/opt/spark/work-dir/scripts
       - ./data:/opt/spark/work-dir/data
@@ -50,6 +50,22 @@ services:
         condition: service_healthy
     command: >
       bash -c "/opt/spark/sbin/start-master.sh && tail -f /opt/spark/logs/*"
+
+  # Data Generator (Continuous CSV Producer)
+  data_generator:
+    build:
+      context: .
+      dockerfile: Dockerfile.generator
+    container_name: realtime_generator
+    environment:
+      - OUTPUT_DIR=/app/data
+    volumes:
+      - ./data:/app/data # Shared with Spark container
+    networks:
+      - realtime_network
+    # Override default command for on-demand generation
+    # Use: docker exec realtime_generator python data_generator.py --events 10 --batches 5
+    command: [ "python", "data_generator.py", "--continuous", "--events", "10", "--interval", "5" ]
 
 networks:
   realtime_network:
