@@ -1,11 +1,14 @@
 -- PostgreSQL Setup Script for E-Commerce Events Pipeline
 -- This script runs automatically when the PostgreSQL container starts
 
+-- Enable UUID extension (required for UUID datatype)
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 -- Create the events table
 CREATE TABLE IF NOT EXISTS user_events (
     id SERIAL PRIMARY KEY,
-    event_id VARCHAR(50) UNIQUE NOT NULL,
-    user_id VARCHAR(50) NOT NULL,
+    event_id UUID UNIQUE NOT NULL,
+    user_id UUID NOT NULL,
     event_type VARCHAR(20) NOT NULL,
     product_id VARCHAR(50) NOT NULL,
     product_name VARCHAR(255) NOT NULL,
@@ -13,7 +16,7 @@ CREATE TABLE IF NOT EXISTS user_events (
     product_price DECIMAL(10, 2),
     quantity INTEGER DEFAULT 1,
     event_timestamp TIMESTAMP NOT NULL,
-    session_id VARCHAR(50),
+    session_id UUID,
     device_type VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -44,4 +47,5 @@ DO $$
 BEGIN
     RAISE NOTICE 'Database setup completed successfully!';
     RAISE NOTICE 'Table "user_events" is ready to receive streaming data.';
+    RAISE NOTICE 'UUID columns: event_id, user_id, session_id';
 END $$;

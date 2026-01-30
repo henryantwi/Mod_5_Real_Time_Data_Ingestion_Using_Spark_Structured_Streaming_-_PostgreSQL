@@ -110,10 +110,12 @@ def write_to_postgres(batch_df, batch_id):
     df_with_timestamp = valid_df.withColumn("created_at", current_timestamp())
 
     # Connection properties
+    # stringtype=unspecified allows PostgreSQL to cast string UUIDs to UUID type automatically
     connection_properties = {
         "user": POSTGRES_USER,
         "password": POSTGRES_PASSWORD,
         "driver": "org.postgresql.Driver",
+        "stringtype": "unspecified",  # Required for UUID columns - lets PostgreSQL infer types
     }
 
     try:

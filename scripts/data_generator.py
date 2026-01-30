@@ -9,6 +9,7 @@ Usage:
 """
 
 import os
+from typing import Any
 import csv
 import uuid
 import random
@@ -57,9 +58,10 @@ def generate_user_id():
     if random.random() < 0.7 and USER_SESSIONS:  # 70% chance to reuse existing user
         return random.choice(list(USER_SESSIONS.keys()))
     
-    user_id = f"USER_{fake.uuid4()[:8].upper()}"
+    # Generate standard UUID format for PostgreSQL UUID column
+    user_id = str(uuid.uuid4())
     USER_SESSIONS[user_id] = {
-        "session_id": f"SESS_{uuid.uuid4().hex[:12].upper()}",
+        "session_id": str(uuid.uuid4()),  # Standard UUID format
         "device": random.choice(DEVICE_TYPES)
     }
     return user_id
@@ -79,7 +81,7 @@ def generate_event():
     quantity = random.randint(1, 3) if event_type in ["purchase", "add_to_cart"] else 1
     
     return {
-        "event_id": f"EVT_{uuid.uuid4().hex[:16].upper()}",
+        "event_id": str(uuid.uuid4()),  # Standard UUID format for PostgreSQL
         "user_id": user_id,
         "event_type": event_type,
         "product_id": product["id"],
@@ -93,12 +95,12 @@ def generate_event():
     }
 
 
-def generate_batch(num_events):
+def generate_batch(num_events: int) -> list[dict[str, str | int | float | datetime]]:
     """Generate a batch of events."""
     return [generate_event() for _ in range(num_events)]
 
 
-def save_to_csv(events, batch_number):
+def save_to_csv(events: list[dict[str, str | int | float | datetime]], batch_number: int) -> str:
     """Save events to a CSV file."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     

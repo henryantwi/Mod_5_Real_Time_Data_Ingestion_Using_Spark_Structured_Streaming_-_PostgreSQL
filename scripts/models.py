@@ -57,11 +57,9 @@ error_logger.addHandler(error_json_handler)
 VALID_EVENT_TYPES = ["view", "add_to_cart", "remove_from_cart", "purchase", "wishlist"]
 VALID_DEVICE_TYPES = ["mobile", "desktop", "tablet"]
 
-# UUID patterns for validation
+# UUID pattern for validation
 # Standard UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 UUID_PATTERN = re.compile(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$')
-# Prefixed UUID format (from data_generator.py): PREFIX_HEXCHARS
-HEX_PATTERN = re.compile(r'^[A-Fa-f0-9]+$')
 
 
 class EcommerceEvent(BaseModel):
@@ -70,20 +68,17 @@ class EcommerceEvent(BaseModel):
     
     Validates all fields according to business rules:
     - Required fields must be present and non-empty
-    - UUID-based IDs accept two formats:
-      1. Standard UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-      2. Prefixed format: EVT_/USER_/SESS_ + hex characters
-      - product_id: PROD prefix (e.g., PROD001)
+    - UUID fields must be in standard format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    - product_id: PROD prefix (e.g., PROD001)
     - Event type must be one of the allowed values
     - Prices must be non-negative
     - Quantities must be at least 1
     """
     
     # Required fields with UUID-based identifiers
-    # min_length=13 accommodates shortest valid format (USER_ + 8 hex = 13 chars)
-    # Standard UUIDs are 36 chars, prefixed formats vary
-    event_id: str = Field(..., min_length=1, description="Unique event identifier (UUID or EVT_ + hex)")
-    user_id: str = Field(..., min_length=1, description="User identifier (UUID or USER_ + hex)")
+    # Standard UUIDs are 36 characters
+    event_id: str = Field(..., min_length=36, max_length=36, description="Unique event identifier (UUID format)")
+    user_id: str = Field(..., min_length=36, max_length=36, description="User identifier (UUID format)")
     event_type: Literal["view", "add_to_cart", "remove_from_cart", "purchase", "wishlist"]
     product_id: str = Field(..., min_length=3, description="Product identifier (PROD*)")
     product_name: str = Field(..., min_length=1, description="Product name")
@@ -93,46 +88,24 @@ class EcommerceEvent(BaseModel):
     product_category: Optional[str] = None
     product_price: Optional[float] = Field(None, ge=0, description="Price must be >= 0")
     quantity: Optional[int] = Field(None, ge=1, description="Quantity must be >= 1")
-    session_id: Optional[str] = Field(None, description="Session identifier (UUID or SESS_ + hex)")
+    session_id: Optional[str] = Field(None, min_length=36, max_length=36, description="Session identifier (UUID format)")
     device_type: Optional[Literal["mobile", "desktop", "tablet"]] = None
 
     @field_validator("event_id")
     @classmethod
     def validate_event_id_format(cls, v: str) -> str:
-        """
-        Validate event_id format. Accepts:
-        - Standard UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        - Prefixed format: EVT_ + 16 hex characters
-        """
-        # Check for standard UUID format first
-        if UUID_PATTERN.match(v):
-            return v
-        # Check for prefixed format (from data_generator.py)
-        if v.startswith("EVT_"):
-            uuid_part = v[4:]
-            if len(uuid_part) == 16 and HEX_PATTERN.match(uuid_part):
-                return v
-            raise ValueError("event_id with EVT_ prefix must have exactly 16 hex characters")
-        raise ValueError("event_id must be a valid UUID or start with 'EVT_' followed by 16 hex characters")
+        """Validate event_id is a valid UUID format."""
+        if not UUID_PATTERN.match(v):
+            raise ValueError("event_id must be a valid UUID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)")
+        return v
 
     @field_validator("user_id")
     @classmethod
     def validate_user_id_format(cls, v: str) -> str:
-        """
-        Validate user_id format. Accepts:
-        - Standard UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        - Prefixed format: USER_ + 8 hex characters
-        """
-        # Check for standard UUID format first
-        if UUID_PATTERN.match(v):
-            return v
-        # Check for prefixed format (from data_generator.py)
-        if v.startswith("USER_"):
-            uuid_part = v[5:]
-            if len(uuid_part) == 8 and HEX_PATTERN.match(uuid_part):
-                return v
-            raise ValueError("user_id with USER_ prefix must have exactly 8 hex characters")
-        raise ValueError("user_id must be a valid UUID or start with 'USER_' followed by 8 hex characters")
+        """Validate user_id is a valid UUID format."""
+        if not UUID_PATTERN.match(v):
+            raise ValueError("user_id must be a valid UUID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)")
+        return v
 
     @field_validator("product_id")
     @classmethod
@@ -145,24 +118,12 @@ class EcommerceEvent(BaseModel):
     @field_validator("session_id")
     @classmethod
     def validate_session_id_format(cls, v: Optional[str]) -> Optional[str]:
-        """
-        Validate session_id format. Accepts:
-        - None (optional field)
-        - Standard UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        - Prefixed format: SESS_ + 12 hex characters
-        """
+        """Validate session_id is a valid UUID format (if provided)."""
         if v is None:
             return v
-        # Check for standard UUID format first
-        if UUID_PATTERN.match(v):
-            return v
-        # Check for prefixed format (from data_generator.py)
-        if v.startswith("SESS_"):
-            uuid_part = v[5:]
-            if len(uuid_part) == 12 and HEX_PATTERN.match(uuid_part):
-                return v
-            raise ValueError("session_id with SESS_ prefix must have exactly 12 hex characters")
-        raise ValueError("session_id must be a valid UUID or start with 'SESS_' followed by 12 hex characters")
+        if not UUID_PATTERN.match(v):
+            raise ValueError("session_id must be a valid UUID (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)")
+        return v
 
     class Config:
         # Allow population by field name (for Spark Row compatibility)
