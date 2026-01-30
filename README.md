@@ -45,7 +45,8 @@ By completing this project, you will:
 
 ### System Architecture Diagram
 
-![System Architecture Diagram](architecture_diagram.png)
+<!-- ![System Architecture Diagram](architecture_diagram.png) -->
+![System Architecture Diagram](updated_architecture_diagram.png)
 
 ### Component Details
 
