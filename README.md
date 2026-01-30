@@ -48,8 +48,85 @@ By completing this project, you will:
 
 ### System Architecture Diagram
 
-<!-- ![System Architecture Diagram](architecture_diagram.png) -->
-![System Architecture Diagram](updated_architecture_diagram.png)
+```mermaid
+flowchart TB
+    subgraph Docker["🐳 Docker Environment"]
+        subgraph SparkContainer["📦 Spark Container (realtime_spark)"]
+            DG["🔄 Data Generator<br/>data_generator.py<br/>(Python + Faker)"]
+            CSV["📁 CSV Files<br/>/data/*.csv"]
+            SS["⚡ Spark Structured<br/>Streaming<br/>(readStream)"]
+            PV["✅ Pydantic<br/>Validation<br/>(models.py)"]
+            PT["📊 Performance<br/>Tracker"]
+            CP["💾 Checkpoints<br/>/output/checkpoints"]
+            
+            DG -->|"Generate Events<br/>(UUID format)"| CSV
+            CSV -->|"Monitor Directory<br/>(maxFilesPerTrigger=1)"| SS
+            SS -->|"Micro-batch<br/>(10s trigger)"| PV
+            PV -->|"Valid Records"| JDBC["🔌 JDBC Writer<br/>(foreachBatch)"]
+            PV -->|"Invalid Records"| LOG["📝 Error Logs<br/>/logs/*.json"]
+            SS --> CP
+            JDBC --> PT
+        end
+        
+        subgraph PGContainer["📦 PostgreSQL Container (realtime_postgres)"]
+            PG["🐘 PostgreSQL 15<br/>ecommerce_events DB"]
+            TBL["📋 user_events Table<br/>(UUID columns)"]
+            IDX["🔍 Indexes<br/>(user_id, event_type,<br/>timestamp, product_id)"]
+            VIEW["📈 event_summary<br/>View"]
+            
+            PG --> TBL
+            TBL --> IDX
+            TBL --> VIEW
+        end
+        
+        JDBC -->|"JDBC Connection<br/>(stringtype=unspecified)"| PG
+        
+        NET["🌐 realtime_network<br/>(Docker Bridge)"]
+    end
+    
+    subgraph Ports["🔌 Exposed Ports"]
+        P1["5432: PostgreSQL"]
+        P2["8080: Spark Master UI"]
+        P3["4040: Spark App UI"]
+        P4["7077: Spark Master"]
+    end
+    
+    subgraph Volumes["💾 Mounted Volumes"]
+        V1["./scripts → /opt/spark/work-dir/scripts"]
+        V2["./data → /opt/spark/work-dir/data"]
+        V3["./logs → /opt/spark/work-dir/logs"]
+        V4["./output → /opt/spark/work-dir/output"]
+        V5["postgres_data → /var/lib/postgresql/data"]
+    end
+    
+    Docker --- Ports
+    Docker --- Volumes
+
+    style DG fill:#e1f5fe
+    style SS fill:#fff3e0
+    style PV fill:#e8f5e9
+    style PG fill:#fce4ec
+    style JDBC fill:#f3e5f5
+    style NET fill:#eeeeee
+```
+
+#### Data Flow Summary
+
+```mermaid
+flowchart LR
+    A["📝 Generate<br/>Events"] --> B["📁 CSV<br/>Files"]
+    B --> C["⚡ Spark<br/>Streaming"]
+    C --> D["✅ Validate<br/>(Pydantic)"]
+    D --> E{"Valid?"}
+    E -->|Yes| F["🐘 PostgreSQL"]
+    E -->|No| G["📝 Error Log"]
+    
+    style A fill:#e3f2fd
+    style C fill:#fff8e1
+    style D fill:#e8f5e9
+    style F fill:#fce4ec
+    style G fill:#ffebee
+```
 
 ### Component Details
 
