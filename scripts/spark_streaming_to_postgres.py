@@ -10,7 +10,7 @@ Usage:
 
 import os
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, current_timestamp
+from pyspark.sql.functions import col
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -19,6 +19,10 @@ from pyspark.sql.types import (
     IntegerType,
     TimestampType,
 )
+
+# Import psycopg2 for direct PostgreSQL upsert operations
+import psycopg2
+from psycopg2.extras import execute_values
 
 # Import Pydantic validation functions
 from models import validate_batch, log_validation_summary, get_log_file_paths
@@ -68,11 +72,95 @@ def create_spark_session():
     )
 
 
+def upsert_to_postgres(valid_rows: list[dict], batch_id: int) -> dict:
+    """
+    Upsert records to PostgreSQL using ON CONFLICT DO UPDATE.
+    
+    This handles:
+    - Duplicate event_id: Updates existing record with new values
+    - Corrected data: Re-sent records replace errored ones
+    - Data deduplication: Same event won't create duplicate rows
+    
+    Returns:
+        dict with 'inserted' and 'updated' counts
+    """
+    # Upsert SQL with ON CONFLICT DO UPDATE
+    # When event_id already exists, update all fields with new values
+    upsert_sql = """
+        INSERT INTO user_events (
+            event_id, user_id, event_type, product_id, product_name,
+            product_category, product_price, quantity, event_timestamp,
+            session_id, device_type, created_at
+        ) VALUES (
+            %(event_id)s, %(user_id)s, %(event_type)s, %(product_id)s, %(product_name)s,
+            %(product_category)s, %(product_price)s, %(quantity)s, %(event_timestamp)s,
+            %(session_id)s, %(device_type)s, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (event_id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            event_type = EXCLUDED.event_type,
+            product_id = EXCLUDED.product_id,
+            product_name = EXCLUDED.product_name,
+            product_category = EXCLUDED.product_category,
+            product_price = EXCLUDED.product_price,
+            quantity = EXCLUDED.quantity,
+            event_timestamp = EXCLUDED.event_timestamp,
+            session_id = EXCLUDED.session_id,
+            device_type = EXCLUDED.device_type,
+            created_at = CURRENT_TIMESTAMP
+        RETURNING (xmax = 0) AS inserted;
+    """
+    # Note: xmax = 0 means INSERT, xmax != 0 means UPDATE
+    
+    conn = None
+    inserted_count = 0
+    updated_count = 0
+    
+    try:
+        # Connect to PostgreSQL directly
+        conn = psycopg2.connect(
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            database=POSTGRES_DB,
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD
+        )
+        
+        with conn.cursor() as cursor:
+            for row in valid_rows:
+                cursor.execute(upsert_sql, row)
+                result = cursor.fetchone()
+                if result and result[0]:  # inserted = True
+                    inserted_count += 1
+                else:
+                    updated_count += 1
+        
+        conn.commit()
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if conn:
+            conn.close()
+    
+    return {"inserted": inserted_count, "updated": updated_count}
+
+
 def write_to_postgres(batch_df, batch_id):
     """
-    Write each micro-batch to PostgreSQL after Pydantic validation.
-    Invalid rows are logged and skipped; valid rows are written.
-    Performance metrics are tracked for each batch.
+    Write each micro-batch to PostgreSQL after Pydantic validation using UPSERT.
+    
+    This function:
+    1. Validates rows using Pydantic
+    2. Upserts valid rows using ON CONFLICT DO UPDATE
+    3. Logs invalid rows and tracks performance metrics
+    
+    Upsert handles:
+    - Duplicate records: Same event_id won't cause errors
+    - Corrected data: Updated values replace old ones
+    - Data deduplication: Prevents duplicate inserts
     """
     # Get performance tracker
     tracker = get_tracker()
@@ -102,45 +190,28 @@ def write_to_postgres(batch_df, batch_id):
         tracker.end_batch()
         return
 
-    # Create DataFrame from valid rows
-    spark = batch_df.sparkSession
-    valid_df = spark.createDataFrame(valid_rows)
-    
-    # Add created_at timestamp
-    df_with_timestamp = valid_df.withColumn("created_at", current_timestamp())
-
-    # Connection properties
-    # stringtype=unspecified allows PostgreSQL to cast string UUIDs to UUID type automatically
-    connection_properties = {
-        "user": POSTGRES_USER,
-        "password": POSTGRES_PASSWORD,
-        "driver": "org.postgresql.Driver",
-        "stringtype": "unspecified",  # Required for UUID columns - lets PostgreSQL infer types
-    }
-
     try:
         # Track database write time
         tracker.start_db_write()
         
-        # Write valid records to PostgreSQL
-        df_with_timestamp.write.jdbc(
-            url=JDBC_URL,
-            table="user_events",
-            mode="append",
-            properties=connection_properties,
-        )
+        # Upsert valid records to PostgreSQL (INSERT or UPDATE)
+        upsert_result = upsert_to_postgres(valid_rows, batch_id)
         
         # Record DB write completion
         tracker.record_db_write()
+        
+        inserted = upsert_result["inserted"]
+        updated = upsert_result["updated"]
 
         print(
-            f"Batch {batch_id}: Successfully wrote {len(valid_rows)} records to PostgreSQL"
+            f"Batch {batch_id}: Successfully upserted {len(valid_rows)} records "
+            f"({inserted} inserted, {updated} updated)"
         )
         if invalid_rows:
             print(f"Batch {batch_id}: Skipped {len(invalid_rows)} invalid records")
 
     except Exception as e:
-        print(f"Batch {batch_id}: Error writing to PostgreSQL - {str(e)}")
+        print(f"Batch {batch_id}: Error upserting to PostgreSQL - {str(e)}")
         raise
     finally:
         # End batch tracking

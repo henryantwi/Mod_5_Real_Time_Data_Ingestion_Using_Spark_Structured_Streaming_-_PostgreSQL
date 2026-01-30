@@ -42,6 +42,32 @@ GROUP BY event_type;
 GRANT ALL PRIVILEGES ON TABLE user_events TO lab_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO lab_user;
 
+-- ============================================
+-- Hourly Aggregations Table (for Watermarking Demo)
+-- ============================================
+-- Stores windowed aggregations computed by Spark Streaming
+-- Uses composite unique constraint for upsert support
+
+CREATE TABLE IF NOT EXISTS event_hourly_summary (
+    id SERIAL PRIMARY KEY,
+    window_start TIMESTAMP NOT NULL,
+    window_end TIMESTAMP NOT NULL,
+    event_type VARCHAR(20) NOT NULL,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    total_revenue DECIMAL(12, 2) DEFAULT 0,
+    unique_users INTEGER DEFAULT 0,
+    unique_products INTEGER DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(window_start, window_end, event_type)
+);
+
+-- Index for efficient time-range queries
+CREATE INDEX IF NOT EXISTS idx_hourly_summary_window ON event_hourly_summary(window_start, window_end);
+CREATE INDEX IF NOT EXISTS idx_hourly_summary_event_type ON event_hourly_summary(event_type);
+
+-- Grant permissions for aggregation table
+GRANT ALL PRIVILEGES ON TABLE event_hourly_summary TO lab_user;
+
 -- Display confirmation message
 DO $$
 BEGIN
